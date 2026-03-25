@@ -1,0 +1,76 @@
+name: Build & Release SonotekoSwift DMG
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build (unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project SonotekoSwift.xcodeproj \
+            -scheme SonotekoSwift \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_ENTITLEMENTS="" \
+            CODE_SIGN_STYLE=Manual \
+            ENABLE_HARDENED_RUNTIME=NO \
+            DEVELOPMENT_TEAM="" \
+            ONLY_ACTIVE_ARCH=NO \
+            build 2>&1 | tee build.log
+
+      - name: Show build log on failure
+        if: failure()
+        run: tail -200 build.log || true
+
+      - name: Create DMG
+        run: |
+          APP=$(find build -name 'SonotekoSwift.app' -maxdepth 6 | head -1)
+          echo "App found at: $APP"
+          mkdir -p dmg_staging
+          cp -R "$APP" dmg_staging/
+          ln -s /Applications dmg_staging/Applications
+          hdiutil create \
+            -volname "Sonoteko" \
+            -srcfolder dmg_staging \
+            -ov -format UDZO \
+            Sonoteko.dmg
+
+      - name: Upload DMG as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sonoteko-macOS
+          path: Sonoteko.dmg
+          retention-days: 90
+
+      - name: Create GitHub Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: Sonoteko.dmg
+          body: |
+            ## Sonoteko fuer macOS
+
+            ### Installation
+            1. Sonoteko.dmg herunterladen
+            2. DMG oeffnen, App in Programme ziehen
+            3. Erster Start: Rechtsklick auf App > Oeffnen > Oeffnen bestaetigen (einmalig)
+            4. Ab jetzt normal per Doppelklick starten
+
+            Optionales Feature: `brew install ffmpeg` fuer ReplayGain-Analyse
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
